@@ -1,0 +1,335 @@
+import pandas as pd
+import os
+import re
+import openpyxl
+from openpyxl.styles import Font, PatternFill
+
+from datetime import datetime
+
+import tkinter as tk
+from tkinter import filedialog
+
+import colorsys
+
+# Create the main application window
+def open_file_diologbox():
+    global file_path
+    file_path = filedialog.askopenfilename()
+    if file_path:
+        print("Select file",file_path )
+        return base_file_path
+    
+def open_file_diologbox_xchangerate():
+    global xchfile_path
+    xchfile_path = filedialog.askopenfilename()
+    if file_path:
+        print("Select file", xchfile_path )
+        return xchangeRate_file
+
+def open_file_diologbox_keywords():
+    global keywords_path
+    keywords_path = filedialog.askopenfilename()
+    if file_path:
+        print("Select file", keywords_path )
+        return keywords_file
+
+
+        
+
+def hsl_to_rgb(h, s, l):
+    r, g, b = colorsys.hsv_to_rgb(h/360.0, l/100.0, s/100.0)
+    return f'#{int(r * 255):02X}{int(g * 255):02X}{int(b * 255):02X}'
+
+h = 34
+s = 80
+l = 90
+bg_colour = hsl_to_rgb(h,s,l)
+
+root = tk.Tk()
+root.title("Select file")
+
+root.configure(bg=bg_colour)
+root.geometry('300x300')
+
+labelImport = tk.Label(root, text= "Import Process", bg= "#B0E0E6", fg="Black", font=("Arial", 22))
+label = tk.Label(root, text= "Data Analysis - India", bg= "lightblue", fg="Black", font=("Arial", 22))
+labelImport.pack(padx=20 , pady=20)
+label.pack(padx=10, pady=10)
+
+base_file_path = tk.Button(root, text="Select base file", command=open_file_diologbox, bg="lightblue", fg="Black", font=("Arial", 12,))
+xchangeRate_file = tk.Button(root, text="Select xchangerate file", command=open_file_diologbox_xchangerate, bg="lightblue", fg="Black", font=("Arial", 12))
+keywords_file = tk.Button(root, text="Select keyword file", command=open_file_diologbox_keywords, bg="lightblue", fg="Black", font=("Arial", 12))
+
+
+
+base_file_path.pack()   
+xchangeRate_file.pack()
+keywords_file.pack()
+
+root.mainloop()
+
+# file_path = "D:\Cleaning\Ch-25AllIndia+JNPTimportaug2023.xlsx"
+
+df = pd.read_excel(file_path)
+# print(df.columns)
+# print(df.head)
+columnNames = ['Material','Grade','Size','Mole','Premium','Trade Name','Quantity(MT)','CIF USD','Year','Month','Key','xchangeRate_1','xchangeRate_2']
+
+for i in range(0,len(columnNames)):
+    print(columnNames[i])
+    df[columnNames[i]] = [None] * len(df)
+
+# df['Material'] = [None] * len(df)
+# df['Grade'] = [None] * len(df)
+# df['Mole'] = [None] * len(df)
+# df['Premium'] = [None] * len(df)
+# df['Trade Name'] = [None] * len(df)
+# df['Quantity(MT)'] = [None] * len(df)
+# df['CIF USD'] = [None] * len(df)
+# df['Year'] = [None] * len(df)
+# df['Month'] = [None] * len(df)
+
+# df['Key'] = [None] * len(df)
+# df['xchangerate check'] = [None] * len(df)
+# df['xchangeRate_1'] = [None] * len(df)
+# df['xchangeRate_2'] = [None] * len(df)
+
+cleaning = {' ':''}
+cleaning = {re.escape(key): value for key, value in cleaning.items()}
+df['UQC']= df['UQC'].replace(cleaning, regex=True)
+df['INVOICE_CURRENCY']= df['INVOICE_CURRENCY'].replace(cleaning, regex=True)
+
+def quatity(row):
+    
+    if row['UQC'] == 'KGS':
+        return row['Quantity']/1000
+    if  row['UQC'] == 'MTS':
+        return row['Quantity']
+    else:
+        return None
+df['Quantity(MT)'] = df.apply(quatity, axis = 1)
+
+def Convert_date(row):
+    try:
+        date_obj = pd.to_datetime(row, format='%Y-%m-%d %H:%M:%S')
+        return date_obj.strftime('%d-%m-%Y')
+    except ValueError:
+        return row 
+    
+
+df['BE_Date'] = df['BE_Date'].apply(Convert_date)
+
+df['Year'] = pd.to_datetime(df['BE_Date'], format='%d-%m-%Y').dt.year
+
+df['Month'] = pd.to_datetime(df['BE_Date'], format='%d-%m-%Y').dt.month
+df['Year'] = df['Year'].astype('str')
+df['Month'] = df['Month'].astype('str')
+df['Key'] = df['Year']+" "+ df['Month']
+
+
+# xchange rate file 
+# xchangeRate_file = "D:\Xrate19-aug23.xlsx"    
+xchangeRate = pd.read_excel(xchfile_path)
+
+# print(xchangeRate)
+merged_df = pd.merge(df, xchangeRate, on='Key', how='left')
+
+# type 
+
+merged_df['xchangeRate'] = merged_df['xchangeRate'].astype(float)
+
+merged_df['Total assess value in Foreign currency'] = merged_df['Quantity']*merged_df['Invoice_Unit_Price_FC']
+merged_df['Total assess value in Foreign currency'] = merged_df['Total assess value in Foreign currency'].astype(float)
+
+merged_df.rename(columns={'TOTAL_ASS_VALUE' :'TOTAL_ASS_VALUE IN INR'}, inplace=True)
+merged_df['TOTAL_ASS_VALUE IN INR'] = merged_df['TOTAL_ASS_VALUE IN INR'].astype(float)
+
+
+
+
+
+
+def USD(val):
+    
+    if val['INVOICE_CURRENCY'] == 'USD':
+        return val['Total assess value in Foreign currency']
+    
+    else:
+        if val['INVOICE_CURRENCY']!='USD':
+            return val['TOTAL_ASS_VALUE IN INR'] * val['xchangeRate']
+        
+
+        
+merged_df['CIF_USD'] = merged_df.apply(USD, axis = 1 )   
+
+
+merged_df['xchangeRate_1'] = merged_df['TOTAL_ASS_VALUE IN INR']/merged_df['CIF_USD']
+merged_df['xchangeRate_1'] = merged_df['xchangeRate_1'].astype(float)
+
+def xch(row):
+    
+    if row['xchangeRate_1'] > 85 :
+        return row['TOTAL_ASS_VALUE IN INR'] * row['xchangeRate']
+    elif row['xchangeRate_1'] < 70:            
+        return row['TOTAL_ASS_VALUE IN INR'] * row['xchangeRate']
+    elif row['xchangeRate_1'] < 85 :
+        return row['CIF_USD']
+    elif row['xchangeRate_1'] < 70:  
+        return row['CIF_USD']
+
+
+# print(merged_df.apply(xch, axis = 1))
+merged_df['CIF USD']= merged_df.apply(xch, axis = 1)
+
+merged_df['xchangeRate_2'] = merged_df['TOTAL_ASS_VALUE IN INR']/merged_df['CIF USD']
+
+#function for cleaning importer and exporter name.
+
+
+replacements = {
+    '.': ' ',
+    ',': ' ',
+    'LTD': 'LIMITED',
+    'PVT': 'PRIVATE',
+    '&': ' AND ',
+    'M/S': '',
+    '': ' ',
+    '(': ' ',
+    ')': ' ',
+    '': ' ',
+    '*': ' ',
+    '-': ' ',
+    '/': ' ',
+    '|': ' ',
+    '/': ' ',
+    '!': ' ',
+    ';': ' ',
+    ':': ' ',
+    'Pharmaceuticals': 'Pharmaceutical',
+    'Enterprises': 'Enterprise',
+    'Solutions': 'Solution',
+    'Technologies': 'Technology',
+    'Textiles': 'Textile',
+    'Products': 'Product',
+    'Electricals': 'Electrical',
+    'Industries': 'Industry',
+    'Pte ltd': 'Priavte Limited',
+    'Coltd': 'Comapny Limited',
+    'PTELTD':'PRIVATE LIMITED',
+    'CO LIMITED': 'COMPANY LIMITED',
+    'CO  LIMITED': 'COMPANY LIMITED',
+    'co  limited': 'COMPANY LIMITED',
+    'Co  LIMITED': 'COMPANY LIMITED'
+}
+
+# def cleaning_Country_Name(row):
+
+# need to update cleaning in the data
+replacements = {re.escape(key): value for key, value in replacements.items()}
+
+merged_df['Importer_Name']= merged_df['Importer_Name'].replace(replacements, regex=True)
+merged_df['Supplier_Name']= merged_df['Supplier_Name'].replace(replacements, regex=True)
+
+
+cleaning_country ={}
+#asking keywords from users
+# keywords_file = "D:\Keywords.xlsx"
+# keyword_to_material = input("Material name: ")
+# keywords_input = input("enter keywords for instance, ['DOLOMITE', 'LIMESTONE']: ")
+keywordsdf = pd.read_excel(keywords_path)
+
+
+
+
+
+def Material(row):
+    founded_materials= []
+    for index, keyword_row in keywordsdf.iterrows():
+        
+        if str(keyword_row['keywords']) in str(row['Item_Description']):
+            founded_materials.append( keyword_row['Material_name'])
+    if not founded_materials:
+            return None
+    else:
+        return founded_materials
+
+merged_df['Material'] = merged_df.apply(Material, axis = 1)
+
+
+
+# keywordsdf['Garde_name'] = keywordsdf['Garde_name'].astype(str)
+def grading(row):
+    founded_grading =[]
+    for index, grade_row in keywordsdf.iterrows():
+        
+        if str(grade_row['Grade_keyword']) in str(row['Item_Description']):
+            founded_grading.append(grade_row['Garde_name'])
+    if not founded_grading:
+        return None
+    else:
+        return founded_grading
+    
+merged_df['Grade']  = merged_df.apply(grading, axis=1)  
+
+
+
+
+# def Size(row, keywordsdf):
+#     Size_grading =[]
+    
+    
+#     # Size_row['Size_keyword'] = Size_row['Size_keyword'].astype(str)
+#     for index, Size_row in keywordsdf.iterrows():
+        
+#         if str(Size_row['Size_keyword']) in str(row['Product Description']):
+#             Size_grading.append(Size_row['Size_name'])
+#     if not Size_row:
+#         return None
+#     else:
+#         return Size_grading
+    
+      
+# merged_df['Size']  = merged_df.apply(lambda row: Size(row, keywordsdf), axis=1)  
+
+
+
+# def mole(row):
+#     global x
+#     x = []
+#     for x in range(1,100):    
+        
+    
+
+# molekeywords=[' 2M ', ' MOLE ',' 3M ',' 2M ',' 1M ',' 2m ', ' mole ',' 3m ',' 2m ',' 1m ']    
+# def moleGrading(row):
+#     for i in moleGrading(row):
+#         if  i in row['Product Description']:
+#             return moleGrading
+#     return None
+    
+# merged_df['Mole'] =   merged_df.apply(moleGrading, axis = 1)  
+    
+    
+
+
+
+# merged_df['Material']= (merged_df['Material']).apply(lambda x : ', '.join)
+
+
+
+
+merged_df['Importer_Name'] = merged_df['Importer_Name'].apply(lambda x: str(x).strip().title())
+merged_df['Supplier_Name'] = merged_df['Supplier_Name'].apply(lambda x: str(x).strip().title())
+merged_df['location'] = merged_df['location'].apply(lambda x: str(x).strip().title())
+
+# merged_df['Importer_Address'] = merged_df['Importer_Address'].apply(lambda x: str(x).strip().title())
+# merged_df['CITY'] = merged_df['CITY'].apply(lambda x: str(x).strip().title())
+# merged_df['Foreign Country'] = merged_df['Foreign Country'].apply(lambda x: str(x).strip().title())
+# merged_df.drop(['CIF_USD','xchangeRate_1','Key'], axis = 1 ,inplace=True)
+
+
+    
+output_file = input("Enter file outfile name: " ) # Replace with the desired file name
+merged_df.to_excel(output_file, index=False)
+print("DONE")
+
